@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+    <title>Socket.IO chat</title>
+    <style>
+      body {
+        margin: 0;
+        padding-bottom: 3rem;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+
+      #form {
+        background: rgba(0, 0, 0, 0.15);
+        padding: 0.25rem;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        display: flex;
+        height: 3rem;
+        box-sizing: border-box;
+        backdrop-filter: blur(10px);
+      }
+      #input {
+        border: none;
+        padding: 0 1rem;
+        flex-grow: 1;
+        border-radius: 2rem;
+        margin: 0.25rem;
+      }
+      #input:focus {
+        outline: none;
+      }
+      #form > button {
+        background: #333;
+        border: none;
+        padding: 0 1rem;
+        margin: 0.25rem;
+        border-radius: 3px;
+        outline: none;
+        color: #fff;
+      }
+
+      #messages {
+        list-style-type: none;
+        margin: 0;
+        padding: 0;
+      }
+      #messages > li {
+        padding: 0.5rem 1rem;
+      }
+      #messages > li:nth-child(odd) {
+        background: #efefef;
+      }
+      #users-list {
+        position: fixed;
+        right: 0;
+        top: 0;
+        width: 200px;
+        background: #f0f0f0;
+        padding: 1rem;
+        height: 100vh;
+        overflow-y: auto;
+      }
+      #users-list h3 {
+        margin-top: 0;
+      }
+      .user-item {
+        padding: 0.5rem;
+        margin: 0.25rem 0;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+      .user-item:hover {
+        background: #e0e0e0;
+      }
+      .user-item.selected {
+        background: #4caf50;
+        color: white;
+      }
+      .private-message {
+        background: #e3f2fd !important;
+        border-left: 3px solid #2196f3;
+      }
+      .sent-message {
+        background: #f1f8e9 !important;
+        border-left: 3px solid #4caf50;
+      }
+      #messages-container {
+        margin-right: 220px;
+      }
+      .message-meta {
+        font-size: 0.8em;
+        color: #666;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="users-list">
+      <h3>Online Users</h3>
+      <p style="font-size: 0.9em; color: #666">
+        Click a user to send private message
+      </p>
+      <div id="users"></div>
+      <button
+        id="clear-selection"
+        style="margin-top: 1rem; padding: 0.5rem; width: 100%"
+      >
+        Send to All
+      </button>
+    </div>
+    <div id="messages-container">
+      <ul id="messages"></ul>
+    </div>
+    <form id="form" action="">
+      <p id="typing-status"></p>
+      <input
+        id="input"
+        autocomplete="off"
+        placeholder="Type a message..."
+      /><button>Send</button>
+    </form>
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+      const socket = io();
+      const form = document.getElementById("form");
+      const input = document.getElementById("input");
+      const messages = document.getElementById("messages");
+      const typingStatus = document.getElementById("typing-status");
+      const usersContainer = document.getElementById("users");
+      const clearSelectionBtn = document.getElementById("clear-selection");
+
+      let mySocketId = null;
+      let selectedUserId = null;
+
+      // Get my socket ID
+      socket.on("your_id", (id) => {
+        mySocketId = id;
+        console.log("My socket ID:", id);
+      });
+
+      // Display list of online users
+      socket.on("users_list", (usersList) => {
+        usersContainer.innerHTML = "";
+        usersList.forEach((user) => {
+          const userDiv = document.createElement("div");
+          userDiv.className = "user-item";
+          userDiv.textContent =
+            user.id === mySocketId ? "You" : user.id.slice(0, 8);
+          userDiv.dataset.userId = user.id;
+
+          if (user.id === selectedUserId) {
+            userDiv.classList.add("selected");
+          }
+
+          if (user.id !== mySocketId) {
+            userDiv.addEventListener("click", () => {
+              selectedUserId = user.id;
+              document.querySelectorAll(".user-item").forEach((el) => {
+                el.classList.remove("selected");
+              });
+              userDiv.classList.add("selected");
+              input.placeholder = `Private message to ${user.id.slice(
+                0,
+                8
+              )}...`;
+            });
+          }
+
+          usersContainer.appendChild(userDiv);
+        });
+      });
+
+      // Clear selection to send to all
+      clearSelectionBtn.addEventListener("click", () => {
+        selectedUserId = null;
+        document.querySelectorAll(".user-item").forEach((el) => {
+          el.classList.remove("selected");
+        });
+        input.placeholder = "Type a message...";
+      });
+
+      // Send message (public or private)
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (input.value) {
+          if (selectedUserId) {
+            // Send private message
+            socket.emit("private_message", {
+              recipientId: selectedUserId,
+              message: input.value,
+            });
+          } else {
+            // Send public message
+            socket.emit("chat message", input.value);
+          }
+          input.value = "";
+        }
+      });
+
+      // Receive public message
+      socket.on("send_message_to_all", (msg) => {
+        console.log("Message received:", msg);
+        const item = document.createElement("li");
+        item.innerHTML = `<div>${msg}</div><div class="message-meta">Public message</div>`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+
+      // Receive private message
+      socket.on("receive_private_message", ({ from, message }) => {
+        const item = document.createElement("li");
+        item.className = "private-message";
+        item.innerHTML = `<div>${message}</div><div class="message-meta">Private from ${from.slice(
+          0,
+          8
+        )}</div>`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+
+      // Confirmation that private message was sent
+      socket.on("private_message_sent", ({ to, message }) => {
+        const item = document.createElement("li");
+        item.className = "sent-message";
+        item.innerHTML = `<div>${message}</div><div class="message-meta">Private to ${to.slice(
+          0,
+          8
+        )}</div>`;
+        messages.appendChild(item);
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+      input.addEventListener("keydown", () => {
+        socket.emit("typing");
+      });
+      socket.on("show_typing_status", () => {
+        typingStatus.innerHTML = "Someone is typing...";
+      });
+      input.addEventListener("keyup", () => {
+        setTimeout(() => {
+          socket.emit("stop_typing");
+        }, 1000);
+      });
+      socket.on("hide_typing_status", () => {
+        typingStatus.innerHTML = "";
+      });
+    </script>
+  </body>
+</html>
